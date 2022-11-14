@@ -11,10 +11,11 @@ var ErrDelimLargerThanBuffer = errors.New("delimiter cannot be larger than buffe
 
 // Single allocation reader.
 // The idea is that we will keep reading and writing to out, until we encounter
-// the delimiter
+// the delimiter.
+// Not safe for concurrent use
 type BufReader struct {
-	in  io.Reader
-	out io.Writer
+	In  io.Reader
+	Out io.Writer
 
 	// index of first non-read byte
 	i int
@@ -26,17 +27,13 @@ type BufReader struct {
 
 func New(in io.Reader, out io.Writer, size int) *BufReader {
 	return &BufReader{
-		in:  in,
-		out: out,
+		In:  in,
+		Out: out,
 
 		i:   0,
 		end: 0,
 		buf: make([]byte, size),
 	}
-}
-
-func (b *BufReader) SetOutput(w io.Writer) {
-	b.out = w
 }
 
 func (b *BufReader) Empty() bool {
@@ -59,7 +56,7 @@ func (b *BufReader) Refill() (int, error) {
 		b.i, b.end = 0, 0
 	}
 
-	n, err := b.in.Read(b.buf[b.end:])
+	n, err := b.In.Read(b.buf[b.end:])
 	if err != nil {
 		return n, err
 	}
@@ -83,7 +80,7 @@ func (b *BufReader) Flush(n int) (int, error) {
 		b.i, b.end = 0, 0
 	}
 
-	return b.out.Write(valid_buf)
+	return b.Out.Write(valid_buf)
 }
 
 // Writes the remaining contents of the buffer

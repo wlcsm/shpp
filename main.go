@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"codeberg.org/wlcsm/shpp/bufreader"
 )
@@ -37,10 +36,6 @@ var (
 	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
 )
 
-var (
-	TempFile = filepath.Join(os.TempDir(), "shpp.tmp")
-)
-
 // Okay theres an annoying bug where if at the end of the buffer we get '%' the
 // start of the escape sequence, then we must write it to the end. What I
 // propose is that we only read up to the second last character unless it is %
@@ -50,7 +45,8 @@ func Run(r io.Reader, w io.Writer) error {
 	bufr := bufreader.New(r, w, 4096)
 	searchItem := LeftDelimiter
 
-	var f *os.File
+	var stdinPipe io.WriteCloser
+	var cmd *exec.Cmd
 
 	for {
 		err := bufr.Find(searchItem)
@@ -66,27 +62,29 @@ func Run(r io.Reader, w io.Writer) error {
 
 		if bytes.Equal(searchItem, RightDelimiter) {
 			searchItem = LeftDelimiter
-			f.Close()
+			stdinPipe.Close()
 
-			// probably not the best way to do this
-			os.Args[0] = TempFile
-			cmd := exec.Command("sh", os.Args...)
-			cmd.Stdout = w
-			cmd.Stderr = w
-
-			// ignore errors, they will appear in the text
-			_ = cmd.Run()
-
-			bufr.SetOutput(w)
-		} else {
-			searchItem = RightDelimiter
-
-			f, err = os.OpenFile(TempFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-			if err != nil {
+			if err := cmd.Wait(); err != nil {
 				return err
 			}
 
-			bufr.SetOutput(f)
+			bufr.Out = w
+		} else {
+			cmd = exec.Command("sh")
+			cmd.Stdout = w
+			cmd.Stderr = w
+
+			stdinPipe, err = cmd.StdinPipe()
+			if err != nil {
+				return err
+			}
+			bufr.Out = stdinPipe
+
+			if err = cmd.Start(); err != nil {
+				return err
+			}
+
+			searchItem = RightDelimiter
 		}
 	}
 }
