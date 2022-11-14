@@ -1,4 +1,10 @@
-package bufreader
+// Simple buffered pipe.
+//
+// The most important application for us is the ProcessUntil which is used to
+// pass data through the pipe until in encounters a specified delimiter.
+//
+// Not safe for concurrent use
+package pipebuf
 
 import (
 	"bytes"
@@ -13,7 +19,7 @@ var ErrDelimLargerThanBuffer = errors.New("delimiter cannot be larger than buffe
 // The idea is that we will keep reading and writing to out, until we encounter
 // the delimiter.
 // Not safe for concurrent use
-type BufReader struct {
+type PipeBuf struct {
 	In  io.Reader
 	Out io.Writer
 
@@ -25,8 +31,8 @@ type BufReader struct {
 	buf []byte
 }
 
-func New(in io.Reader, out io.Writer, size int) *BufReader {
-	return &BufReader{
+func New(in io.Reader, out io.Writer, size int) *PipeBuf {
+	return &PipeBuf{
 		In:  in,
 		Out: out,
 
@@ -36,16 +42,16 @@ func New(in io.Reader, out io.Writer, size int) *BufReader {
 	}
 }
 
-func (b *BufReader) Empty() bool {
+func (b *PipeBuf) Empty() bool {
 	return b.i == b.end
 }
 
-func (b *BufReader) Full() bool {
+func (b *PipeBuf) Full() bool {
 	return b.end == len(b.buf)
 }
 
 // Loads the buffer again, won't necessarily fill it completely
-func (b *BufReader) Refill() (int, error) {
+func (b *PipeBuf) Refill() (int, error) {
 	if b.Full() {
 		return 0, nil
 	}
@@ -66,8 +72,8 @@ func (b *BufReader) Refill() (int, error) {
 	return n, nil
 }
 
-// Writes the remaining contents of the buffer
-func (b *BufReader) Flush(n int) (int, error) {
+// Writes the specified number of bytes to the writer
+func (b *PipeBuf) Flush(n int) (int, error) {
 	availableBytes := b.end - b.i
 	if n > availableBytes {
 		return 0, fmt.Errorf("buffer contains %d bytes, cannot flush '%d' bytes", availableBytes, n)
@@ -84,13 +90,16 @@ func (b *BufReader) Flush(n int) (int, error) {
 }
 
 // Writes the remaining contents of the buffer
-func (b *BufReader) FlushAll() (int, error) {
+func (b *PipeBuf) FlushAll() (int, error) {
 	return b.Flush(b.end - b.i)
 }
 
 // Finds the next instance of the delimiter by continuously reading and writing
-// from the buffer
-func (b *BufReader) Find(delim []byte) (err error) {
+// from the buffer.
+//
+// Note that after successfully finding the delimiter, it will skip it and
+// *not* write it later.
+func (b *PipeBuf) ProcessUntil(delim []byte) (err error) {
 	if len(delim) > len(b.buf) {
 		return ErrDelimLargerThanBuffer
 	}

@@ -1,4 +1,4 @@
-package bufreader
+package pipebuf
 
 import (
 	"bytes"
@@ -66,7 +66,7 @@ func TestBufReader_Find(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := New(tt.fields.in, tt.fields.out, tt.fields.size)
-			err := b.Find(tt.args.delim)
+			err := b.ProcessUntil(tt.args.delim)
 			if err != tt.expected {
 				t.Errorf("BufReader.Find() expected return value='%v' got=%v", tt.expected, err)
 			}
@@ -129,7 +129,7 @@ func TestBufReader_FindMultipleCalls(t *testing.T) {
 			b := New(tt.fields.in, tt.fields.out, tt.fields.size)
 
 			for {
-				err := b.Find(tt.args.delim)
+				err := b.ProcessUntil(tt.args.delim)
 				if err == io.EOF {
 					break
 				}

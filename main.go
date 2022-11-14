@@ -8,13 +8,23 @@ import (
 	"os"
 	"os/exec"
 
-	"codeberg.org/wlcsm/shpp/bufreader"
+	"codeberg.org/wlcsm/shpp/pipebuf"
+)
+
+var (
+	LeftDelimiter  = []byte("%{")
+	RightDelimiter = []byte("}%")
+
+	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
 )
 
 func usage() {
-	fmt.Printf(`usage: %s
+	fmt.Println(`usage: ` + os.Args[0] + ` [-h|--help]
 
-Reads input through stdin. Args may be passed through environment variables\n`, os.Args[0])
+Reads input through stdin and pipes anything inside the '%{' '}%' delimiters
+into sh and substitutes it back into the text.
+
+Arguments may be passed through environment variables`)
 	os.Exit(1)
 }
 
@@ -29,27 +39,19 @@ func main() {
 	}
 }
 
-var (
-	LeftDelimiter  = []byte("%{")
-	RightDelimiter = []byte("}%")
-
-	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
-)
-
-// Okay theres an annoying bug where if at the end of the buffer we get '%' the
-// start of the escape sequence, then we must write it to the end. What I
-// propose is that we only read up to the second last character unless it is %
-// or }, in which case we check the last one. Otherwise we copy the last one to
-// the beginning and read from there
+// Analyses input from the reader to find areas encloses in '%{' '}%'
+// delimiters. Any text outside these delimiters is directly written to the
+// writer. Any text inside the delimiters is first passed to sh via STDIN,
+// where the output is then written to the writer.
 func Run(r io.Reader, w io.Writer) error {
-	bufr := bufreader.New(r, w, 4096)
+	bufr := pipebuf.New(r, w, 4096)
 	searchItem := LeftDelimiter
 
 	var stdinPipe io.WriteCloser
 	var cmd *exec.Cmd
 
 	for {
-		err := bufr.Find(searchItem)
+		err := bufr.ProcessUntil(searchItem)
 		if err == io.EOF {
 			if bytes.Equal(searchItem, RightDelimiter) {
 				return ErrUnclosedDelimiter
