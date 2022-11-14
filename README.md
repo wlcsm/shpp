@@ -1,47 +1,44 @@
-# Simple preprocessor
+# Simple Shell Preprocessor
 
-Just runs `sh` on all the code inside %{ }% blocks in the source. Inspired by the rc templating languages https://werc.cat-v.org/docs/rc-template-lang
+Runs `sh` on all the code inside blocks delimited by `%{` `}%` in the source. Inspired by the rc templating language https://werc.cat-v.org/docs/rc-template-lang
 
-Everything is passed through stdin.
-May pass environment variables
+## Installation
+
+```
+go build
+mv ./shpp /usr/local/bin
+```
 
 ## Examples
 
-```html
-<ul>
-%{
-for(i in a b c) {
-   echo '<li>'$i'</li>'
-}
-}%
-</uL>
-```
-
-becomes
-
-```html
-<ul>
-<li>a</li>
-<li>b</li>
-<li>c</li>
-</ul>
-```
-
-Use envirnoment variables to pass data to the scripts
+Suppose we have the unprocessed file
 
 ```html
 # index.html
-<title>%{echo $NAME}%</title>
+
+<title>%{printf $NAME}%</title
+<ul>
+%{
+for i in a b c; do
+   echo '<li>'$i'</li>'
+done
+}%
+</ul>
 ```
 
-run with
+We can provide the variable `NAME` as an environment variable, and pass the file via STDIN
 
 ```
 NAME=myname shpp < index.html
 ```
 
-produces
+which produces
 
 ```html
 <title>myname</title>
+<ul>
+<li>a</li>
+<li>b</li>
+<li>c</li>
+</ul>
 ```
