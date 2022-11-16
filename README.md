@@ -1,6 +1,10 @@
 # Simple Shell Preprocessor
 
-Runs `sh` on all the code inside blocks delimited by `%{` `}%` in the source. Inspired by the rc templating language https://werc.cat-v.org/docs/rc-template-lang
+Runs `sh` on all the code inside blocks delimited by `%{` `}%` in the source. Inspired by the rc templating language https://werc.cat-v.org/docs/rc-template-lang.
+
+WARNING: Still in testing, do not use for production systems.
+
+The entire contents of the embedded script is run by passing it as the first argument to `sh -c`. This means that it will potentially show up in the process list.
 
 ## Installation
 

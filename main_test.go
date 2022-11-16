@@ -56,7 +56,7 @@ func TestRun(t *testing.T) {
 		{
 			name: "Use arguments",
 			cfg: testInput{
-				In:   "hello, %{ printf $1 }%",
+				In:   "hello, %{ printf $0 }%",
 				Args: []string{"world"},
 			},
 			wantW:   "hello, world",
@@ -66,7 +66,7 @@ func TestRun(t *testing.T) {
 			name: "Stdin with arguments",
 			cfg: testInput{
 				Stdin: "world",
-				In:    `hello, %{ printf "world $1" }%`,
+				In:    `hello, %{ printf "world $0" }%`,
 				Args:  []string{"again!"},
 			},
 			wantW:   "hello, world again!",

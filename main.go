@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"strings"
 	"bytes"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ func main() {
 	cfg := Config{
 		Stdin: os.Stdin,
 		In:    f,
-		Args:  os.Args[1:],
+		Args:  os.Args[2:],
 		Out:   os.Stdout,
 	}
 
@@ -70,21 +71,13 @@ func Run(c Config) error {
 	bufr := bufio.NewReader(c.In)
 	bufw := bufio.NewWriter(c.Out)
 
-	out := bufw
+	var out io.Writer = bufw
 
-	var cmd *exec.Cmd
+	// the second argument is the script itself, to be fill in later
+	args := append([]string{"-c", ""}, c.Args...)
 
-	var f *os.File
-	defer func() {
-		if f != nil {
-			os.Remove(f.Name())
-		}
-	}()
-
-	// arguments to shell program. Need to put the file name before the
-	// other arguments
-	args := make([]string, len(c.Args)+1)
-	copy(args[1:], c.Args)
+	// downside of using a string builder is that it clears its memory every time we reset it.
+	var s strings.Builder
 
 	for {
 		err := search(bufr, out, searchItem)
@@ -101,28 +94,21 @@ func Run(c Config) error {
 		}
 
 		if bytes.Equal(searchItem, LeftDelimiter) {
-			f, err = openFile()
-			if err != nil {
-				return err
-			}
-
-			out = bufio.NewWriter(f)
+			out = &s
 
 			searchItem = RightDelimiter
 		} else {
-			out.Flush()
-			f.Close()
+			args[1] = s.String()
+			s.Reset()
 
-			args[0] = f.Name()
-			cmd = exec.Command("sh", args...)
+			cmd := exec.Command("sh", args...)
 
-			// I think it inherits the parents stdin
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = bufw
 			cmd.Stderr = bufw
 
 			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("running %v: %w", args, err)
+				return fmt.Errorf("running sh %v: %w", args, err)
 			}
 
 			out = bufw
@@ -131,31 +117,16 @@ func Run(c Config) error {
 	}
 }
 
-// global variables are useful
-var tmpFileName string
-
-func openFile() (*os.File, error) {
-	if len(tmpFileName) == 0 {
-		f, err := os.CreateTemp(".", "tmpFile*")
-		if err != nil {
-			return nil, err
-		}
-
-		tmpFileName = f.Name()
-		return f, nil
-	}
-
-	// opens the for writing and ignore any existing contents
-	return os.OpenFile(tmpFileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-}
-
 // Finds the next instance of the delimiter by continuously reading and writing
 // from the buffer.
 //
 // Note that after successfully finding the delimiter, it will skip it and
 // *not* write it later.
-func search(in *bufio.Reader, out *bufio.Writer, delim []byte) error {
+//
+// If we could avoid writing individual bytes then this could potentially be faster
+func search(in *bufio.Reader, out io.Writer, delim []byte) error {
 	i := 0
+	buf := []byte{0}
 
 	for {
 		c, err := in.ReadByte()
@@ -178,7 +149,8 @@ func search(in *bufio.Reader, out *bufio.Writer, delim []byte) error {
 				i = 0
 			}
 
-			out.WriteByte(c)
+			buf[0] = c
+			out.Write(buf)
 		}
 	}
 }
