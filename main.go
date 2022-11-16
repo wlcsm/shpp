@@ -1,14 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-
-	"codeberg.org/wlcsm/shpp/pipebuf"
 )
 
 var (
@@ -44,14 +43,19 @@ func main() {
 // writer. Any text inside the delimiters is first passed to sh via STDIN,
 // where the output is then written to the writer.
 func Run(r io.Reader, w io.Writer) error {
-	bufr := pipebuf.New(r, w, 4096)
 	searchItem := LeftDelimiter
+
+	bufr := bufio.NewReader(r)
+	bufw := bufio.NewWriter(w)
+	defer bufw.Flush()
+
+	out := bufw
 
 	var stdinPipe io.WriteCloser
 	var cmd *exec.Cmd
 
 	for {
-		err := bufr.ProcessUntil(searchItem)
+		err := search(bufr, out, searchItem)
 		if err == io.EOF {
 			if bytes.Equal(searchItem, RightDelimiter) {
 				return ErrUnclosedDelimiter
@@ -62,31 +66,66 @@ func Run(r io.Reader, w io.Writer) error {
 			return err
 		}
 
-		if bytes.Equal(searchItem, RightDelimiter) {
-			searchItem = LeftDelimiter
-			stdinPipe.Close()
-
-			if err := cmd.Wait(); err != nil {
-				return err
-			}
-
-			bufr.Out = w
-		} else {
+		if bytes.Equal(searchItem, LeftDelimiter) {
 			cmd = exec.Command("sh")
-			cmd.Stdout = w
-			cmd.Stderr = w
+			cmd.Stdout = bufw
+			cmd.Stderr = bufw
 
 			stdinPipe, err = cmd.StdinPipe()
 			if err != nil {
 				return err
 			}
-			bufr.Out = stdinPipe
+			out = bufio.NewWriter(stdinPipe)
 
 			if err = cmd.Start(); err != nil {
 				return err
 			}
 
 			searchItem = RightDelimiter
+		} else {
+			out.Flush()
+			stdinPipe.Close()
+
+			if err := cmd.Wait(); err != nil {
+				return err
+			}
+
+			out = bufw
+			searchItem = LeftDelimiter
+		}
+	}
+}
+
+// Finds the next instance of the delimiter by continuously reading and writing
+// from the buffer.
+//
+// Note that after successfully finding the delimiter, it will skip it and
+// *not* write it later.
+func search(in *bufio.Reader, out *bufio.Writer, delim []byte) error {
+	i := 0
+
+	for {
+		c, err := in.ReadByte()
+		if err != nil {
+			if i != 0 {
+				out.Write(delim[:i])
+			}
+			return err
+		}
+
+		if c == delim[i] {
+			if i == len(delim)-1 {
+				return nil
+			}
+
+			i++
+		} else {
+			if i != 0 {
+				out.Write(delim[:i])
+				i = 0
+			}
+
+			out.WriteByte(c)
 		}
 	}
 }
