@@ -1,3 +1,3 @@
-module codeberg.org/wlcsm/shpp
+module github.com/wlcsm/shpp
 
 go 1.19
