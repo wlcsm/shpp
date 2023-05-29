@@ -15,34 +15,23 @@ func TestRun(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		cfg     testInput
-		wantW   string
-		wantErr error
+		name  string
+		cfg   testInput
+		wantW string
 	}{
 		{
 			name: "Simple hello world",
 			cfg: testInput{
 				In: "hello, world",
 			},
-			wantW:   "hello, world",
-			wantErr: nil,
-		},
-		{
-			name: "Unclosed delimiter",
-			cfg: testInput{
-				In: "hello, %{ cat",
-			},
-			wantW:   "",
-			wantErr: ErrUnclosedDelimiter,
+			wantW: "hello, world",
 		},
 		{
 			name: "Closed delimiter",
 			cfg: testInput{
 				In: "hello, %{ printf world }%",
 			},
-			wantW:   "hello, world",
-			wantErr: nil,
+			wantW: "hello, world",
 		},
 		{
 			name: "Use stdin",
@@ -50,8 +39,7 @@ func TestRun(t *testing.T) {
 				Stdin: "world",
 				In:    "hello, %{ printf world }%",
 			},
-			wantW:   "hello, world",
-			wantErr: nil,
+			wantW: "hello, world",
 		},
 		{
 			name: "Use arguments",
@@ -59,8 +47,7 @@ func TestRun(t *testing.T) {
 				In:   "hello, %{ printf $0 }%",
 				Args: []string{"world"},
 			},
-			wantW:   "hello, world",
-			wantErr: nil,
+			wantW: "hello, world",
 		},
 		{
 			name: "Stdin with arguments",
@@ -69,8 +56,7 @@ func TestRun(t *testing.T) {
 				In:    `hello, %{ printf "world $0" }%`,
 				Args:  []string{"again!"},
 			},
-			wantW:   "hello, world again!",
-			wantErr: nil,
+			wantW: "hello, world again!",
 		},
 	}
 	for _, tt := range tests {
@@ -84,14 +70,20 @@ func TestRun(t *testing.T) {
 			}
 
 			if err := Run(cfg); err != nil {
-				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
-				}
-				return
+				t.Error(err)
 			}
 			if gotW := out.String(); gotW != tt.wantW {
 				t.Errorf("Run() = %v, want %v", gotW, tt.wantW)
 			}
 		})
+	}
+}
+
+func TestUnclosedDelimter(t *testing.T) {
+	cfg := Config{
+		In: strings.NewReader("hello, %{ cat"),
+	}
+	if err := Run(cfg); !errors.Is(err, ErrUnclosedDelimiter) {
+		t.Error("expected error due to unclosed delimeter, instead got", err)
 	}
 }
