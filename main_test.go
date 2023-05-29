@@ -8,72 +8,51 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	type testInput struct {
-		Stdin string
-		In    string
-		Args  []string
-	}
-
-	tests := []struct {
-		name  string
-		cfg   testInput
-		wantW string
+	for name, test := range map[string]struct {
+		stdin    string
+		in       string
+		args     []string
+		expect string
 	}{
-		{
-			name: "Simple hello world",
-			cfg: testInput{
-				In: "hello, world",
-			},
-			wantW: "hello, world",
+		"Simple hello world": {
+			in:       "hello, world",
+			expect: "hello, world",
 		},
-		{
-			name: "Closed delimiter",
-			cfg: testInput{
-				In: "hello, %{ printf world }%",
-			},
-			wantW: "hello, world",
+		"Closed delimiter": {
+			in:       "hello, %{ printf world }%",
+			expect: "hello, world",
 		},
-		{
-			name: "Use stdin",
-			cfg: testInput{
-				Stdin: "world",
-				In:    "hello, %{ printf world }%",
-			},
-			wantW: "hello, world",
+		"Use stdin": {
+			stdin:    "world",
+			in:       "hello, %{ printf world }%",
+			expect: "hello, world",
 		},
-		{
-			name: "Use arguments",
-			cfg: testInput{
-				In:   "hello, %{ printf $0 }%",
-				Args: []string{"world"},
-			},
-			wantW: "hello, world",
+		"Use arguments": {
+			in:       "hello, %{ printf $0 }%",
+			args:     []string{"world"},
+			expect: "hello, world",
 		},
-		{
-			name: "Stdin with arguments",
-			cfg: testInput{
-				Stdin: "world",
-				In:    `hello, %{ printf "world $0" }%`,
-				Args:  []string{"again!"},
-			},
-			wantW: "hello, world again!",
+		"stdin with arguments": {
+			stdin:    "world",
+			in:       `hello, %{ printf "world $0" }%`,
+			args:     []string{"again!"},
+			expect: "hello, world again!",
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	} {
+		t.Run(name, func(t *testing.T) {
 			out := &bytes.Buffer{}
 			cfg := Config{
-				Stdin: strings.NewReader(tt.cfg.Stdin),
-				In:    strings.NewReader(tt.cfg.In),
-				Args:  tt.cfg.Args,
+				Stdin: strings.NewReader(test.stdin),
+				In:    strings.NewReader(test.in),
+				Args:  test.args,
 				Out:   out,
 			}
 
 			if err := Run(cfg); err != nil {
 				t.Error(err)
 			}
-			if gotW := out.String(); gotW != tt.wantW {
-				t.Errorf("Run() = %v, want %v", gotW, tt.wantW)
+			if gotW := out.String(); gotW != test.expect {
+				t.Errorf("Run() = %v, want %v", gotW, test.expect)
 			}
 		})
 	}
@@ -84,6 +63,6 @@ func TestUnclosedDelimter(t *testing.T) {
 		In: strings.NewReader("hello, %{ cat"),
 	}
 	if err := Run(cfg); !errors.Is(err, ErrUnclosedDelimiter) {
-		t.Error("expected error due to unclosed delimeter, instead got", err)
+		t.Error("expect error due to unclosed delimeter, instead got", err)
 	}
 }
