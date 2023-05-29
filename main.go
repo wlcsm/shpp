@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
-	"strings"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 var (
@@ -40,53 +40,48 @@ func main() {
 	}
 	defer f.Close()
 
-	cfg := Config{
-		Stdin: os.Stdin,
-		In:    f,
-		Args:  os.Args[2:],
-		Out:   os.Stdout,
-	}
+	stdin := bufio.NewReader(os.Stdin)
+	in := bufio.NewReader(f)
+	args := os.Args[2:]
+	out := bufio.NewWriter(os.Stdout)
 
-	if err := Run(cfg); err != nil {
-		fmt.Println(err.Error())
+	if err := Run(stdin, in, args, out); err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
+
+	out.Flush()
 }
 
-type Config struct {
-	Stdin io.Reader
-	In    io.Reader
-	Args  []string
-
-	Out io.Writer
+type ByteReader interface {
+	ReadByte() (byte, error)
 }
 
 // Analyses input from the reader to find areas encloses in '%{' '}%'
 // delimiters. Any text outside these delimiters is directly written to the
 // writer. Any text inside the delimiters is first passed to sh via STDIN,
 // where the output is then written to the writer.
-func Run(c Config) error {
+func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
 	searchItem := LeftDelimiter
 
-	bufr := bufio.NewReader(c.In)
-	bufw := bufio.NewWriter(c.Out)
-
-	var out io.Writer = bufw
+	// This is the writer that the main loop will write to. When inside a
+	// script block, it will point towards a string buffer, and otherwise,
+	// to the output writer.
+	out := w
 
 	// the second argument is the script itself, to be fill in later
-	args := append([]string{"-c", ""}, c.Args...)
+	allArgs := append([]string{"-c", ""}, args...)
 
 	// downside of using a string builder is that it clears its memory every time we reset it.
 	var s strings.Builder
 
 	for {
-		err := search(bufr, out, searchItem)
+		err := search(in, out, searchItem)
 		if err == io.EOF {
 			if bytes.Equal(searchItem, RightDelimiter) {
 				return ErrUnclosedDelimiter
 			}
 
-			bufw.Flush()
 			return nil
 		}
 		if err != nil {
@@ -98,20 +93,19 @@ func Run(c Config) error {
 
 			searchItem = RightDelimiter
 		} else {
-			args[1] = s.String()
+			allArgs[1] = s.String()
 			s.Reset()
 
-			cmd := exec.Command("sh", args...)
-
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = bufw
-			cmd.Stderr = bufw
+			cmd := exec.Command("sh", allArgs...)
+			cmd.Stdin = stdin
+			cmd.Stdout = w
+			cmd.Stderr = w
 
 			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("running sh %v: %w", args, err)
+				return fmt.Errorf("running 'sh %v': %w", allArgs, err)
 			}
 
-			out = bufw
+			out = w
 			searchItem = LeftDelimiter
 		}
 	}
@@ -124,11 +118,14 @@ func Run(c Config) error {
 // *not* write it later.
 //
 // If we could avoid writing individual bytes then this could potentially be faster
-func search(in *bufio.Reader, out io.Writer, delim []byte) error {
+func search(in ByteReader, out io.Writer, delim []byte) error {
 	i := 0
 	buf := []byte{0}
 
 	for {
+		// There is a possibility that the delim could exist as part of
+		// a unicode glyph. I'm ignoring that case for now as it and
+		// I'm not sure if the current delims have this problem.
 		c, err := in.ReadByte()
 		if err != nil {
 			if i != 0 {
