@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -62,8 +61,6 @@ type ByteReader interface {
 // writer. Any text inside the delimiters is first passed to sh via STDIN,
 // where the output is then written to the writer.
 func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
-	searchItem := LeftDelimiter
-
 	// This is the writer that the main loop will write to. When inside a
 	// script block, it will point towards a string buffer, and otherwise,
 	// to the output writer.
@@ -76,38 +73,37 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
 	var s strings.Builder
 
 	for {
-		err := search(in, out, searchItem)
+		err := search(in, out, LeftDelimiter)
 		if err == io.EOF {
-			if bytes.Equal(searchItem, RightDelimiter) {
-				return ErrUnclosedDelimiter
-			}
-
 			return nil
 		}
 		if err != nil {
 			return err
 		}
 
-		if bytes.Equal(searchItem, LeftDelimiter) {
-			out = &s
+		out = &s
 
-			searchItem = RightDelimiter
-		} else {
-			allArgs[1] = s.String()
-			s.Reset()
-
-			cmd := exec.Command("sh", allArgs...)
-			cmd.Stdin = stdin
-			cmd.Stdout = w
-			cmd.Stderr = w
-
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("running 'sh %v': %w", allArgs, err)
-			}
-
-			out = w
-			searchItem = LeftDelimiter
+		err = search(in, out, RightDelimiter)
+		if err == io.EOF {
+			return ErrUnclosedDelimiter
 		}
+		if err != nil {
+			return err
+		}
+
+		allArgs[1] = s.String()
+		s.Reset()
+
+		cmd := exec.Command("sh", allArgs...)
+		cmd.Stdin = stdin
+		cmd.Stdout = w
+		cmd.Stderr = w
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("running 'sh %v': %w", allArgs, err)
+		}
+
+		out = w
 	}
 }
 
