@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 var (
@@ -16,45 +18,85 @@ var (
 	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
 )
 
+var (
+	help      = flag.Bool("h", false, "help message")
+	tmpFile   = flag.String("t", "./shpp-cache", "temporary file for storing scripts for execution")
+	shebang   = flag.String("p", "/bin/sh", "program used to run scripts")
+	inputFile = flag.String("f", "", "file to read input from. Stdin will be passed to any scripts.")
+)
+
 func usage() {
-	fmt.Println(`usage: ` + os.Args[0] + ` [-h|--help]
+	flag.Usage()
+	flag.CommandLine.Output().Write([]byte(`
+Funnels all text inside '%{' '}%' delimiters into a file, executes it and
+writes the stdout and stderr back into the original text.
 
-Reads input through stdin and pipes anything inside the '%{' '}%' delimiters
-into sh and substitutes it back into the text.
+	$ cat index.template
+	<ul>
+	%{
+	while read line ; do
+	   echo '<li>'$line'</li>'
+	done
+	}%
+	</ul>
+	$ seq 5 | ./shpp -f index.template
+	<ul>
+	<li>1</li>
+	<li>2</li>
+	<li>3</li>
+	<li>4</li>
+	<li>5</li>
 
-Arguments may be passed through environment variables`)
+	</ul>
+
+Use the -p flag to change the program used to execute the script blocks.
+
+	$ cat python_test.md
+	This is %{print('python syntax')}%
+	$ ./shpp -p /usr/bin/python3 < python_test.md
+	This is python syntax
+`))
 	os.Exit(1)
 }
 
-const (
-	defaultTempFile = "./shpp-cache"
-	defaultShebang  = "#!/bin/sh"
-)
-
 // TODO what happens when as user presses Ctrl-C? It probably won't clean up the temporary file
 func main() {
-	if len(os.Args) == 1 || os.Args[1] == "-h" || os.Args[1] == "--help" {
+	if err := run(); err != nil {
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	flag.Parse()
+	args := flag.Args()
+
+	if *help || len(args) != 0 {
 		usage()
 	}
 
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	defer f.Close()
+	// If the a file is given, then read from it and pass stdin.
+	// Otherwise just read from stdin.
+	var stdin io.Reader
+	in := bufio.NewReader(os.Stdin)
 
-	stdin := bufio.NewReader(os.Stdin)
-	in := bufio.NewReader(f)
-	args := os.Args[2:]
+	if len(*inputFile) != 0 {
+		f, err := os.Open(*inputFile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		stdin = in
+		in = bufio.NewReader(f)
+	}
+
 	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
 
-	if err := Run(stdin, in, args, out, defaultTempFile, defaultShebang); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	defer os.Remove(*tmpFile)
 
-	out.Flush()
+	return Process(stdin, in, args, out, *tmpFile, *shebang)
 }
 
 type ByteReader interface {
@@ -63,18 +105,19 @@ type ByteReader interface {
 
 // Analyses input from the reader to find areas encloses in '%{' '}%'
 // delimiters. Any text outside these delimiters is directly written to the
-// writer. Any text inside the delimiters is first passed to sh via STDIN,
-// where the output is then written to the writer.
-func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, shebang string) error {
-	// downside of using a string builder is that it clears its memory every time we reset it.
+// writer. Any text inside the delimiters is written to a file, and executed
+// with the given program before being written to the writer.
+func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, program string) error {
 	f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
 	if err != nil {
 		return fmt.Errorf("creating cache: %w", err)
 	}
-	defer os.Remove(f.Name())
 	defer f.Close()
 
-	shebangWithNL := shebang + "\n"
+	shebang := "#!" + program + "\n"
+
+	// if there was a problem os.OpenFile would have caught it
+	workingFile, _ := filepath.Abs(tmpFile)
 
 	for {
 		err := search(in, w, LeftDelimiter)
@@ -86,7 +129,8 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, sh
 		}
 
 		f.Truncate(0)
-		f.WriteString(shebangWithNL)
+		f.Seek(0, 0)
+		f.WriteString(shebang)
 
 		err = search(in, f, RightDelimiter)
 		if err == io.EOF {
@@ -96,13 +140,13 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, sh
 			return err
 		}
 
-		cmd := exec.Command(f.Name(), args...)
+		cmd := exec.Command(workingFile, args...)
 		cmd.Stdin = stdin
 		cmd.Stdout = w
 		cmd.Stderr = w
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("running 'sh %v': %w", args, err)
+			return fmt.Errorf("running '%s %v': %w", f.Name(), args, err)
 		}
 	}
 }
@@ -112,16 +156,13 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, sh
 //
 // Note that after successfully finding the delimiter, it will skip it and
 // *not* write it later.
-//
-// If we could avoid writing individual bytes then this could potentially be faster
 func search(in ByteReader, out io.Writer, delim []byte) error {
 	i := 0
 	buf := []byte{0}
 
 	for {
 		// There is a possibility that the delim could exist as part of
-		// a unicode glyph. I'm ignoring that case for now as it and
-		// I'm not sure if the current delims have this problem.
+		// a unicode glyph. I'm ignoring that case for now.
 		c, err := in.ReadByte()
 		if err != nil {
 			if i != 0 {

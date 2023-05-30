@@ -43,8 +43,10 @@ func TestRun(t *testing.T) {
 			stdin := strings.NewReader(test.stdin)
 			in := strings.NewReader(test.in)
 			out := &bytes.Buffer{}
+			program := "/bin/sh"
+			tmpFile := "shpp-cache"
 
-			if err := Run(stdin, in, test.args, out, defaultTempFile, defaultShebang); err != nil {
+			if err := Process(stdin, in, test.args, out, tmpFile, program); err != nil {
 				t.Error(err)
 			}
 
@@ -59,8 +61,10 @@ func TestUnclosedDelimter(t *testing.T) {
 	var args []string
 	out := &bytes.Buffer{}
 	in := strings.NewReader("hello, %{ cat")
+	program := "/bin/sh"
+	tmpFile := "shpp-cache"
 
-	if err := Run(nil, in, args, out, defaultTempFile, defaultShebang); !errors.Is(err, ErrUnclosedDelimiter) {
+	if err := Process(nil, in, args, out, tmpFile, program); !errors.Is(err, ErrUnclosedDelimiter) {
 		t.Error("expect error due to unclosed delimeter, instead got", err)
 	}
 }
