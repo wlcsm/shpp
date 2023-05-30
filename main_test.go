@@ -24,17 +24,17 @@ func TestRun(t *testing.T) {
 		},
 		"Use stdin": {
 			stdin:  "world",
-			in:     "hello, %{ printf world }%",
+			in:     "hello, %{ cat - }%",
 			expect: "hello, world",
 		},
 		"Use arguments": {
-			in:     "hello, %{ printf $0 }%",
+			in:     "hello, %{ printf $1 }%",
 			args:   []string{"world"},
 			expect: "hello, world",
 		},
 		"stdin with arguments": {
 			stdin:  "world",
-			in:     `hello, %{ printf "world $0" }%`,
+			in:     `hello, %{ printf "world $1" }%`,
 			args:   []string{"again!"},
 			expect: "hello, world again!",
 		},
@@ -44,12 +44,12 @@ func TestRun(t *testing.T) {
 			in := strings.NewReader(test.in)
 			out := &bytes.Buffer{}
 
-			if err := Run(stdin, in, test.args, out); err != nil {
+			if err := Run(stdin, in, test.args, out, defaultTempFile, defaultShebang); err != nil {
 				t.Error(err)
 			}
 
-			if gotW := out.String(); gotW != test.expect {
-				t.Errorf("Run() = %v, want %v", gotW, test.expect)
+			if got := out.String(); got != test.expect {
+				t.Errorf("got output:\n%s\nwanted:\n%s\n", got, test.expect)
 			}
 		})
 	}
@@ -60,7 +60,7 @@ func TestUnclosedDelimter(t *testing.T) {
 	out := &bytes.Buffer{}
 	in := strings.NewReader("hello, %{ cat")
 
-	if err := Run(nil, in, args, out); !errors.Is(err, ErrUnclosedDelimiter) {
+	if err := Run(nil, in, args, out, defaultTempFile, defaultShebang); !errors.Is(err, ErrUnclosedDelimiter) {
 		t.Error("expect error due to unclosed delimeter, instead got", err)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 var (
@@ -27,6 +26,12 @@ Arguments may be passed through environment variables`)
 	os.Exit(1)
 }
 
+const (
+	defaultTempFile = "./shpp-cache"
+	defaultShebang  = "#!/bin/sh"
+)
+
+// TODO what happens when as user presses Ctrl-C? It probably won't clean up the temporary file
 func main() {
 	if len(os.Args) == 1 || os.Args[1] == "-h" || os.Args[1] == "--help" {
 		usage()
@@ -44,7 +49,7 @@ func main() {
 	args := os.Args[2:]
 	out := bufio.NewWriter(os.Stdout)
 
-	if err := Run(stdin, in, args, out); err != nil {
+	if err := Run(stdin, in, args, out, defaultTempFile, defaultShebang); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -60,20 +65,19 @@ type ByteReader interface {
 // delimiters. Any text outside these delimiters is directly written to the
 // writer. Any text inside the delimiters is first passed to sh via STDIN,
 // where the output is then written to the writer.
-func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
-	// This is the writer that the main loop will write to. When inside a
-	// script block, it will point towards a string buffer, and otherwise,
-	// to the output writer.
-	out := w
-
-	// the second argument is the script itself, to be fill in later
-	allArgs := append([]string{"-c", ""}, args...)
-
+func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, shebang string) error {
 	// downside of using a string builder is that it clears its memory every time we reset it.
-	var s strings.Builder
+	f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
+	if err != nil {
+		return fmt.Errorf("creating cache: %w", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	shebangWithNL := shebang + "\n"
 
 	for {
-		err := search(in, out, LeftDelimiter)
+		err := search(in, w, LeftDelimiter)
 		if err == io.EOF {
 			return nil
 		}
@@ -81,9 +85,10 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
 			return err
 		}
 
-		out = &s
+		f.Truncate(0)
+		f.WriteString(shebangWithNL)
 
-		err = search(in, out, RightDelimiter)
+		err = search(in, f, RightDelimiter)
 		if err == io.EOF {
 			return ErrUnclosedDelimiter
 		}
@@ -91,19 +96,14 @@ func Run(stdin io.Reader, in ByteReader, args []string, w io.Writer) error {
 			return err
 		}
 
-		allArgs[1] = s.String()
-		s.Reset()
-
-		cmd := exec.Command("sh", allArgs...)
+		cmd := exec.Command(f.Name(), args...)
 		cmd.Stdin = stdin
 		cmd.Stdout = w
 		cmd.Stderr = w
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("running 'sh %v': %w", allArgs, err)
+			return fmt.Errorf("running 'sh %v': %w", args, err)
 		}
-
-		out = w
 	}
 }
 
