@@ -19,14 +19,14 @@ var (
 )
 
 var (
-	help      = flag.Bool("h", false, "help message")
-	tmpFile   = flag.String("t", "./shpp-cache", "temporary file for storing scripts for execution")
-	shebang   = flag.String("p", "/bin/sh", "program used to run scripts")
-	inputFile = flag.String("f", "", "file to read input from. Stdin will be passed to any scripts.")
+	help    = flag.Bool("h", false, "help message")
+	tmpFile = flag.String("t", "./shpp-cache", "temporary file for storing scripts for execution")
+	shebang = flag.String("p", "/bin/sh", "program used to run scripts")
 )
 
 func usage() {
-	flag.Usage()
+	fmt.Fprintf(flag.CommandLine.Output(), "usage %s [flags] [file]:\n", os.Args[0])
+	flag.PrintDefaults()
 	flag.CommandLine.Output().Write([]byte(`
 Funnels all text inside '%{' '}%' delimiters into a file, executes it and
 writes the stdout and stderr back into the original text.
@@ -39,7 +39,7 @@ writes the stdout and stderr back into the original text.
 	done
 	}%
 	</ul>
-	$ seq 5 | ./shpp -f index.template
+	$ seq 5 | ./shpp index.template
 	<ul>
 	<li>1</li>
 	<li>2</li>
@@ -71,7 +71,7 @@ func run() error {
 	flag.Parse()
 	args := flag.Args()
 
-	if *help || len(args) != 0 {
+	if *help || len(args) > 1 {
 		usage()
 	}
 
@@ -80,14 +80,18 @@ func run() error {
 	var stdin io.Reader
 	in := bufio.NewReader(os.Stdin)
 
-	if len(*inputFile) != 0 {
-		f, err := os.Open(*inputFile)
+	if len(args) == 1 {
+		f, err := os.Open(args[0])
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 
-		stdin = in
+		// If it doesn't has data, then exec.Command will hang waiting
+		// for it. So just keep it nil if nothing is there.
+		if stdinHasData() {
+			stdin = in
+		}
 		in = bufio.NewReader(f)
 	}
 
@@ -97,6 +101,11 @@ func run() error {
 	defer os.Remove(*tmpFile)
 
 	return Process(stdin, in, args, out, *tmpFile, *shebang)
+}
+
+func stdinHasData() bool {
+	stat, _ := os.Stdin.Stat()
+	return (stat.Mode() & os.ModeCharDevice) == 0
 }
 
 type ByteReader interface {
