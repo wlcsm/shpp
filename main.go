@@ -152,10 +152,7 @@ func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile
 }
 
 // Finds the next instance of the delimiter by continuously reading and writing
-// from the buffer.
-//
-// Note that after successfully finding the delimiter, it will skip it and
-// *not* write it later.
+// from the buffer. It will *not* write the delimiter.
 func search(in ByteReader, out io.Writer, delim []byte) error {
 	i := 0
 	buf := []byte{0}
