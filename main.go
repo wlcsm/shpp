@@ -87,8 +87,7 @@ func run() error {
 		}
 		defer f.Close()
 
-		// If it doesn't has data, then exec.Command will hang waiting
-		// for it. So just keep it nil if nothing is there.
+		// If it doesn't have data, then exec.Command will hang
 		if stdinHasData() {
 			stdin = in
 		}
