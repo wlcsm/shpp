@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -18,27 +17,34 @@ var (
 	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
 )
 
-var (
-	help    = flag.Bool("h", false, "help message")
-	tmpFile = flag.String("t", "./shpp-cache", "temporary file for storing scripts for execution")
-	shebang = flag.String("p", "/bin/sh", "program used to run scripts")
+const (
+	defaultTmpFile = "./shpp-cache"
+	defaultProgram = "/bin/sh"
 )
 
 func usage() {
-	fmt.Fprintf(flag.CommandLine.Output(), "usage %s [flags] [file]:\n", os.Args[0])
-	flag.PrintDefaults()
-	flag.CommandLine.Output().Write([]byte(`
+	os.Stdout.WriteString(`usage: shpp [file]
+
 Funnels all text inside '%{' '}%' delimiters into a file, executes it and
 writes the stdout and stderr back into the original text.
+
+Environment variables:
+
+	SHPP_PROGRAM  The shebang used to execute the code blocks (default: %s)
+
+	SHPP_TMPFILE  The temporary file used to execute the code blocks (default: %s)
+
+Examples:
 
 	$ cat index.template
 	<ul>
 	%{
-	while read line ; do
+	while read line; do
 	   echo '<li>'$line'</li>'
 	done
 	}%
 	</ul>
+
 	$ seq 5 | ./shpp index.template
 	<ul>
 	<li>1</li>
@@ -48,14 +54,7 @@ writes the stdout and stderr back into the original text.
 	<li>5</li>
 
 	</ul>
-
-Use the -p flag to change the program used to execute the script blocks.
-
-	$ cat python_test.md
-	This is %{print('python syntax')}%
-	$ ./shpp -p /usr/bin/python3 < python_test.md
-	This is python syntax
-`))
+`)
 	os.Exit(1)
 }
 
@@ -68,11 +67,19 @@ func main() {
 }
 
 func run() error {
-	flag.Parse()
-	args := flag.Args()
-
-	if *help || len(args) > 1 {
+	args := os.Args[1:]
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		usage()
+	}
+
+	shebang := defaultProgram
+	if s := os.Getenv("SHPP_PROGRAM"); len(s) != 0 {
+		shebang = s
+	}
+
+	tmpFile := defaultTmpFile
+	if t := os.Getenv("SHPP_TMPFILE"); len(t) != 0 {
+		tmpFile = t
 	}
 
 	// If the a file is given, then read from it and pass stdin.
@@ -97,9 +104,9 @@ func run() error {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 
-	defer os.Remove(*tmpFile)
+	defer os.Remove(tmpFile)
 
-	return Process(stdin, in, args, out, *tmpFile, *shebang)
+	return Process(stdin, in, args, out, tmpFile, shebang)
 }
 
 func stdinHasData() bool {
@@ -118,11 +125,11 @@ type ByteReader interface {
 func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, program string) error {
 	f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
 	if err != nil {
-		return fmt.Errorf("creating cache: %w", err)
+		return fmt.Errorf("opening temporary file '%s': %w", tmpFile, err)
 	}
 	defer f.Close()
 
-	shebang := "#!" + program + "\n"
+	shebang := "#!" + program
 
 	// if there was a problem os.OpenFile would have caught it
 	workingFile, _ := filepath.Abs(tmpFile)
@@ -138,7 +145,7 @@ func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile
 
 		f.Truncate(0)
 		f.Seek(0, 0)
-		f.WriteString(shebang)
+		f.WriteString(shebang + "\n")
 
 		err = search(in, f, RightDelimiter)
 		if err == io.EOF {

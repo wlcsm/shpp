@@ -68,3 +68,20 @@ func TestUnclosedDelimter(t *testing.T) {
 		t.Error("expect error due to unclosed delimeter, instead got", err)
 	}
 }
+
+func TestAlternateShebangs(t *testing.T) {
+	var args []string
+	out := &bytes.Buffer{}
+	in := strings.NewReader("Hello from %{print('Python3!', end='')}%")
+	program := "/usr/bin/env python3"
+	tmpFile := "shpp-cache"
+
+	if err := Process(nil, in, args, out, tmpFile, program); err != nil {
+		t.Error(err)
+	}
+
+	expected := "Hello from Python3!"
+	if out.String() != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, out.String())
+	}
+}
