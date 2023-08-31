@@ -28,38 +28,52 @@ func usage() {
 Funnels all text inside '%{' '}%' delimiters into a file, executes it and
 writes the stdout and stderr back into the original text.
 
-shpp will read from stdin if no arguments are supplied. Otherwise it will read from the input file provided as the first argument. Stdin will be able to be read from within the code blocks as well. Positional arguments after the input file will also be provided to the child.
-If you want to read from stdin and also provide positional arguments, then you must put "-" as the positional argument for the input file.
+	$ cat template.html
+	<p>%{echo "Hello, world}%</p>
+
+	$ shpp template.html
+	<p>Hello, world</p>
+
+shpp will read from stdin if no arguments are supplied. Otherwise it will read
+from the input file provided as the first argument.
+
+	$ shpp < template.html
+	<p>Hello, world</p>
+
+When the code inside the delimiters is executed, it will have access to the
+STDIN, environment variables, and positional arguments of the parent process.
+
+Passing via stdin
+
+	$ cat template.html
+	<p>%{ cat }%</p>
+
+	$ echo "Hello World" | shpp template.yaml
+	Hello, world
+
+Passing via environment variables
+
+	$ echo "%{echo \$MSG}%" | MSG="Hello, world" ./shpp
+	Hello, world
+
+Passing via positional arguments
+
+	$ cat template.html
+	<p>%{ echo $1, $2 }%</p>
+
+	$ echo "Hello World" | shpp template.yaml "Hello" "world"
+	<p>Hello, world</p>
+
+The "-" character in the place of the template file name signifies the template
+should be read from STDIN. This is useful when needed to provide positional
+arguments.
+
+	$ echo "%{printf \$1 \$2}%" | shpp - "Hello," "world"
+	Hello, world
 
 Environment variables:
 
 	SHPP_PROGRAM  The shebang used to execute the code blocks (default: /bin/sh)
-
-Examples:
-
-	Read from stdin and pass positional arguments
-
-	$ echo "%{printf \$1 \$2}%" | shpp - "Hello," "world!"
-	Hello, world!
-
-	$ cat index.template
-	<ul>
-	%{
-	while read line; do
-	   echo '<li>'$line'</li>'
-	done
-	}%
-	</ul>
-
-	$ seq 5 | ./shpp index.template
-	<ul>
-	<li>1</li>
-	<li>2</li>
-	<li>3</li>
-	<li>4</li>
-	<li>5</li>
-
-	</ul>
 `)
 	os.Exit(1)
 }
