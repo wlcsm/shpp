@@ -23,18 +23,24 @@ const (
 )
 
 func usage() {
-	os.Stdout.WriteString(`usage: shpp [file]
+	os.Stdout.WriteString(`usage: shpp [file] [args ... ]
 
 Funnels all text inside '%{' '}%' delimiters into a file, executes it and
 writes the stdout and stderr back into the original text.
 
+shpp will read from stdin if no arguments are supplied. Otherwise it will read from the input file provided as the first argument. Stdin will be able to be read from within the code blocks as well. Positional arguments after the input file will also be provided to the child.
+If you want to read from stdin and also provide positional arguments, then you must put "-" as the positional argument for the input file.
+
 Environment variables:
 
-	SHPP_PROGRAM  The shebang used to execute the code blocks (default: %s)
-
-	SHPP_TMPFILE  The temporary file used to execute the code blocks (default: %s)
+	SHPP_PROGRAM  The shebang used to execute the code blocks (default: /bin/sh)
 
 Examples:
+
+	Read from stdin and pass positional arguments
+
+	$ echo "%{printf \$1 \$2}%" | shpp - "Hello," "world!"
+	Hello, world!
 
 	$ cat index.template
 	<ul>
@@ -87,18 +93,24 @@ func run() error {
 	var stdin io.Reader
 	in := bufio.NewReader(os.Stdin)
 
-	if len(args) == 1 {
-		f, err := os.Open(args[0])
-		if err != nil {
-			return err
-		}
-		defer f.Close()
+	if len(args) > 0 {
+		if args[0] != "-" {
+			f, err := os.Open(args[0])
+			if err != nil {
+				return err
+			}
+			defer f.Close()
 
-		// If it doesn't have data, then exec.Command will hang
-		if stdinHasData() {
-			stdin = in
+			// If it doesn't have data, then exec.Command will hang
+			if stdinHasData() {
+				stdin = in
+			}
+			in = bufio.NewReader(f)
 		}
-		in = bufio.NewReader(f)
+
+		// Skip the input file, args is now just the list of arguments
+		// that we will be provided to the code blocks.
+		args = args[1:]
 	}
 
 	out := bufio.NewWriter(os.Stdout)
