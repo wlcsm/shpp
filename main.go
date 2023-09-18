@@ -123,11 +123,6 @@ type ByteReader interface {
 // writer. Any text inside the delimiters is written to a file, and executed
 // with the given program before being written to the writer.
 func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, program string) error {
-	f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
-	if err != nil {
-		return fmt.Errorf("opening temporary file '%s': %w", tmpFile, err)
-	}
-	defer f.Close()
 
 	shebang := "#!" + program
 
@@ -135,7 +130,12 @@ func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile
 	workingFile, _ := filepath.Abs(tmpFile)
 
 	for {
-		err := search(in, w, LeftDelimiter)
+		f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
+		if err != nil {
+			return fmt.Errorf("opening temporary file '%s': %w", tmpFile, err)
+		}
+
+		err = search(in, w, LeftDelimiter)
 		if err == io.EOF {
 			return nil
 		}
@@ -154,7 +154,7 @@ func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile
 		if err != nil {
 			return err
 		}
-
+		f.Close()
 		cmd := exec.Command(workingFile, args...)
 		cmd.Stdin = stdin
 		cmd.Stdout = w
