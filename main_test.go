@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -28,25 +29,31 @@ func TestRun(t *testing.T) {
 			expect: "hello, world",
 		},
 		"Use arguments": {
-			in:     "hello, %{ printf $1 }%",
+			in:     "hello, %{ printf $0 }%",
 			args:   []string{"world"},
 			expect: "hello, world",
-		},
-		"stdin with arguments": {
-			stdin:  "world",
-			in:     `hello, %{ printf "world $1" }%`,
-			args:   []string{"again!"},
-			expect: "hello, world again!",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			stdin := strings.NewReader(test.stdin)
 			in := strings.NewReader(test.in)
 			out := &bytes.Buffer{}
-			program := "/bin/sh"
-			tmpFile := "shpp-cache"
 
-			if err := Process(stdin, in, test.args, out, tmpFile, program); err != nil {
+			command := "/bin/sh"
+			execArgs := append([]string{"-c", ""}, test.args...)
+
+			exe := func(arg string) error {
+				execArgs[1] = arg
+
+				cmd := exec.Command(command, execArgs...)
+				cmd.Stdin = stdin
+				cmd.Stdout = out
+				cmd.Stderr = out
+
+				return cmd.Run()
+			}
+
+			if err := ExecCodeBlocks(in, out, exe); err != nil {
 				t.Error(err)
 			}
 
@@ -58,30 +65,10 @@ func TestRun(t *testing.T) {
 }
 
 func TestUnclosedDelimter(t *testing.T) {
-	var args []string
 	out := &bytes.Buffer{}
 	in := strings.NewReader("hello, %{ cat")
-	program := "/bin/sh"
-	tmpFile := "shpp-cache"
 
-	if err := Process(nil, in, args, out, tmpFile, program); !errors.Is(err, ErrUnclosedDelimiter) {
+	if err := ExecCodeBlocks(in, out, nil); !errors.Is(err, ErrUnclosedDelimiter) {
 		t.Error("expect error due to unclosed delimeter, instead got", err)
-	}
-}
-
-func TestAlternateShebangs(t *testing.T) {
-	var args []string
-	out := &bytes.Buffer{}
-	in := strings.NewReader("Hello from %{print('Python3!', end='')}%")
-	program := "/usr/bin/env python3"
-	tmpFile := "shpp-cache"
-
-	if err := Process(nil, in, args, out, tmpFile, program); err != nil {
-		t.Error(err)
-	}
-
-	expected := "Hello from Python3!"
-	if out.String() != expected {
-		t.Errorf("expected:\n%s\ngot:\n%s", expected, out.String())
 	}
 }

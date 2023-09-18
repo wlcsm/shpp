@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 )
 
 var (
@@ -17,16 +17,19 @@ var (
 	ErrUnclosedDelimiter = errors.New("unclosed delimiter: contains '%{' without a matching '}%'")
 )
 
-const (
-	defaultTmpFile = "./shpp-cache"
-	defaultProgram = "/bin/sh"
-)
+const defaultCommand = "/bin/sh"
 
 func usage() {
 	os.Stdout.WriteString(`usage: shpp [file] [args ... ]
 
-Funnels all text inside '%{' '}%' delimiters into a file, executes it and
-writes the stdout and stderr back into the original text.
+Executes all text inside '%{' '}%' delimiters with the following command and
+inserts the stdout and stderr back into the original text.
+
+	<prog> -c <text> [<args> ... ]
+
+
+The <prog> is /bin/sh by default and can be changed with the SHPP_COMMAND
+environment variable.
 
 	$ cat template.html
 	<p>%{echo "Hello, world}%</p>
@@ -40,7 +43,7 @@ from the input file provided as the first argument.
 	$ shpp < template.html
 	<p>Hello, world</p>
 
-When the code inside the delimiters is executed, it will have access to the
+When the code inside the delimiters is executed, it will have access to
 STDIN, environment variables, and positional arguments of the parent process.
 
 Passing via stdin
@@ -48,12 +51,12 @@ Passing via stdin
 	$ cat template.html
 	<p>%{ cat }%</p>
 
-	$ echo "Hello World" | shpp template.yaml
-	Hello, world
+	$ echo 'Hello World' | shpp template.yaml
+	<p>Hello, world</p>
 
 Passing via environment variables
 
-	$ echo "%{echo \$MSG}%" | MSG="Hello, world" ./shpp
+	$ echo '%{echo $MSG}%' | MSG='Hello, world' ./shpp
 	Hello, world
 
 Passing via positional arguments
@@ -61,24 +64,23 @@ Passing via positional arguments
 	$ cat template.html
 	<p>%{ echo $1, $2 }%</p>
 
-	$ echo "Hello World" | shpp template.yaml "Hello" "world"
+	$ echo 'Hello World' | shpp template.yaml 'Hello' 'world'
 	<p>Hello, world</p>
 
 The "-" character in the place of the template file name signifies the template
 should be read from STDIN. This is useful when needed to provide positional
 arguments.
 
-	$ echo "%{printf \$1 \$2}%" | shpp - "Hello," "world"
+	$ echo '%{printf $1 $2}%' | shpp - 'Hello,' 'world'
 	Hello, world
 
 Environment variables:
 
-	SHPP_PROGRAM  The shebang used to execute the code blocks (default: /bin/sh)
+	SHPP_COMMAND  The command used to execute the codeblock (default: /bin/sh)
 `)
 	os.Exit(1)
 }
 
-// TODO what happens when as user presses Ctrl-C? It probably won't clean up the temporary file
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprint(os.Stderr, err)
@@ -92,14 +94,9 @@ func run() error {
 		usage()
 	}
 
-	shebang := defaultProgram
-	if s := os.Getenv("SHPP_PROGRAM"); len(s) != 0 {
-		shebang = s
-	}
-
-	tmpFile := defaultTmpFile
-	if t := os.Getenv("SHPP_TMPFILE"); len(t) != 0 {
-		tmpFile = t
+	command := defaultCommand
+	if s := os.Getenv("SHPP_COMMAND"); len(s) != 0 {
+		command = s
 	}
 
 	// If the a file is given, then read from it and pass stdin.
@@ -115,7 +112,7 @@ func run() error {
 			}
 			defer f.Close()
 
-			// If it doesn't have data, then exec.Command will hang
+			// If stdin doesn't have data, exec.Command will hang
 			if stdinHasData() {
 				stdin = in
 			}
@@ -130,9 +127,22 @@ func run() error {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 
-	defer os.Remove(tmpFile)
+	execArgs := append([]string{"-c", ""}, args...)
 
-	return Process(stdin, in, args, out, tmpFile, shebang)
+	// Executes the codeblock by running the command
+	//    <cmd> -c <codeblock> [ <args> ... ]
+	exe := func(arg string) error {
+		execArgs[1] = arg
+
+		cmd := exec.Command(command, execArgs...)
+		cmd.Stdin = stdin
+		cmd.Stdout = out
+		cmd.Stderr = out
+
+		return cmd.Run()
+	}
+
+	return ExecCodeBlocks(in, out, exe)
 }
 
 func stdinHasData() bool {
@@ -140,28 +150,16 @@ func stdinHasData() bool {
 	return (stat.Mode() & os.ModeCharDevice) == 0
 }
 
-type ByteReader interface {
+type byteReader interface {
 	ReadByte() (byte, error)
 }
 
-// Analyses input from the reader to find areas encloses in '%{' '}%'
-// delimiters. Any text outside these delimiters is directly written to the
-// writer. Any text inside the delimiters is written to a file, and executed
-// with the given program before being written to the writer.
-func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile, program string) error {
-
-	shebang := "#!" + program
-
-	// if there was a problem os.OpenFile would have caught it
-	workingFile, _ := filepath.Abs(tmpFile)
+// Executes codeblocks in the input and writes everything else.
+func ExecCodeBlocks(in byteReader, w io.Writer, exe func(string) error) error {
+	var buf strings.Builder
 
 	for {
-		f, err := os.OpenFile(tmpFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0700)
-		if err != nil {
-			return fmt.Errorf("opening temporary file '%s': %w", tmpFile, err)
-		}
-
-		err = search(in, w, LeftDelimiter)
+		err := search(in, w, LeftDelimiter)
 		if err == io.EOF {
 			return nil
 		}
@@ -169,32 +167,25 @@ func Process(stdin io.Reader, in ByteReader, args []string, w io.Writer, tmpFile
 			return err
 		}
 
-		f.Truncate(0)
-		f.Seek(0, 0)
-		f.WriteString(shebang + "\n")
-
-		err = search(in, f, RightDelimiter)
+		err = search(in, &buf, RightDelimiter)
 		if err == io.EOF {
 			return ErrUnclosedDelimiter
 		}
 		if err != nil {
 			return err
 		}
-		f.Close()
-		cmd := exec.Command(workingFile, args...)
-		cmd.Stdin = stdin
-		cmd.Stdout = w
-		cmd.Stderr = w
 
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("running '%s %v': %w", f.Name(), args, err)
+		if err := exe(buf.String()); err != nil {
+			return fmt.Errorf("executing code block: %w", err)
 		}
+
+		buf.Reset()
 	}
 }
 
 // Finds the next instance of the delimiter by continuously reading and writing
 // from the buffer. It will *not* write the delimiter.
-func search(in ByteReader, out io.Writer, delim []byte) error {
+func search(in byteReader, out io.Writer, delim []byte) error {
 	i := 0
 	buf := []byte{0}
 
