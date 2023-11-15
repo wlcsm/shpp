@@ -1,10 +1,14 @@
 # Simple Shell Preprocessor
 
-Executes all the code inside blocks delimited by `%{` `}%` and substitutes it back into the source. 
+Executes all text inside '%{' '}%' delimiters in the source text with a given program (default: `/bin/sh`) and inserts the stdout and stderr back into the original text.
 
-More specifically, the code inside the blocks will be written to a temporary file with a shebang added and executed. Its output will then be substituted back into the input stream and printed to STDOUT.
+More specifically, the text blocks will be given to the program as a positional argument and executed as
 
-Inspired by the rc templating language https://werc.cat-v.org/docs/rc-template-lang.
+```
+<prog> -c <text> [<args> ... ]
+```
+
+Inspired by [pp](https://adi.onl/pp.html) and the rc templating language https://werc.cat-v.org/docs/rc-template-lang.
 
 ## Installation
 
@@ -14,63 +18,66 @@ go install github.com/wlcsm/shpp@latest
 
 ## Configuration
 
-The temporary file can be configured with the `SHPP_TMPFILE` (default: `./shpp-cache`) environment variable and the program used to execute the scripts can be configured with `SHPP_PROGRAM` (default: `/bin/sh`) environment variable.
+* `SHPP_COMMAND`  The command used to execute the codeblock (default: `/bin/sh`)
 
 ## Examples
 
-```html
-# example.txt
-<title>Hello from %{printf "the Shell!"}%</title>
-```
+Basic usage will be to include the templated file as a positional argument
 
 ```
-$ shpp example.txt
-Hello from the Shell!
+$ cat template.html
+<p>%{echo "Hello, world}%</p>
+
+$ shpp template.html
+<p>Hello, world</p>
 ```
 
-Environment variables are also passed into the program
-
-```html
-# example.txt
-Hi %{printf $NAME}%
-```
+shpp will read from stdin if no arguments are supplied.
 
 ```
-$ NAME=user shpp example.txt
-Hi user
+$ shpp < template.html
+<p>Hello, world</p>
 ```
 
-We can also create templates by using a main template file and passing data from stdin. This is a very paired down version of the pipeline used on my website.
+When the code inside the delimiters is executed, it will have access to STDIN, environment variables, and positional arguments of the parent process.
 
-```html
-# html_template.html
-<!DOCTYPE html>
-<html lang="en">
-  <head></head>
-  <body>
-    <div id="content">
-      %{cat}%
-    </div>
-  </body>
-</html>
-
-# blog_post.html
-<h1>New blog!</h1>
-<p>Check out my new website!</p>
-```
+Passing via stdin
 
 ```
-$ shpp html_template.html < blog_post.html
+$ cat template.html
+<p>%{ cat }%</p>
 
-# html_template.html
-<!DOCTYPE html>
-<html lang="en">
-  <head></head>
-  <body>
-    <div id="content">
-      <h1>New blog!</h1>
-<p>Check out my new website!</p>
-    </div>
-  </body>
-</html>
+$ echo 'Hello World' | shpp template.yaml
+<p>Hello, world</p>
+```
+
+Passing via environment variables
+
+```
+$ echo '%{echo $MSG}%' | MSG='Hello, world' ./shpp
+Hello, world
+```
+
+Passing via positional arguments
+
+```
+$ cat template.html
+<p>%{ echo $1, $2 }%</p>
+
+$ echo 'Hello World' | shpp template.yaml 'Hello' 'world'
+<p>Hello, world</p>
+```
+
+The "-" character may be used in place of the source file name to signify the template should be read from STDIN. This is useful when needed to provide positional arguments.
+
+```
+$ echo '%{printf $1 $2}%' | shpp - 'Hello,' 'world'
+Hello, world
+```
+
+The program used to execute the code blocks may be configured with the `SHPP_COMMAND` environment variable
+
+```
+$ echo '%{print("Hi")}%' | SHPP_COMMAND="$(which python3)" ./shpp
+Hi
 ```
