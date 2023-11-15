@@ -20,64 +20,7 @@ var (
 const defaultCommand = "/bin/sh"
 
 func usage() {
-	os.Stdout.WriteString(`usage: shpp [file] [args ... ]
-
-Executes all text inside '%{' '}%' delimiters with the following command and
-inserts the stdout and stderr back into the original text.
-
-	<prog> -c <text> [<args> ... ]
-
-
-The <prog> is /bin/sh by default and can be changed with the SHPP_COMMAND
-environment variable.
-
-	$ cat template.html
-	<p>%{echo "Hello, world}%</p>
-
-	$ shpp template.html
-	<p>Hello, world</p>
-
-shpp will read from stdin if no arguments are supplied. Otherwise it will read
-from the input file provided as the first argument.
-
-	$ shpp < template.html
-	<p>Hello, world</p>
-
-When the code inside the delimiters is executed, it will have access to
-STDIN, environment variables, and positional arguments of the parent process.
-
-Passing via stdin
-
-	$ cat template.html
-	<p>%{ cat }%</p>
-
-	$ echo 'Hello World' | shpp template.yaml
-	<p>Hello, world</p>
-
-Passing via environment variables
-
-	$ echo '%{echo $MSG}%' | MSG='Hello, world' ./shpp
-	Hello, world
-
-Passing via positional arguments
-
-	$ cat template.html
-	<p>%{ echo $1, $2 }%</p>
-
-	$ echo 'Hello World' | shpp template.yaml 'Hello' 'world'
-	<p>Hello, world</p>
-
-The "-" character in the place of the template file name signifies the template
-should be read from STDIN. This is useful when needed to provide positional
-arguments.
-
-	$ echo '%{printf $1 $2}%' | shpp - 'Hello,' 'world'
-	Hello, world
-
-Environment variables:
-
-	SHPP_COMMAND  The command used to execute the codeblock (default: /bin/sh)
-`)
+	os.Stdout.WriteString("usage: shpp [file] [args ... ]")
 	os.Exit(1)
 }
 
