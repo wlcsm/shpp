@@ -97,7 +97,8 @@ type byteReader interface {
 	ReadByte() (byte, error)
 }
 
-// Executes codeblocks in the input and writes everything else.
+// Executes codeblocks from the input with the provided function and writes
+// everything else.
 func ExecCodeBlocks(in byteReader, w io.Writer, exe func(string) error) error {
 	var buf strings.Builder
 
@@ -126,8 +127,8 @@ func ExecCodeBlocks(in byteReader, w io.Writer, exe func(string) error) error {
 	}
 }
 
-// Finds the next instance of the delimiter by continuously reading and writing
-// from the buffer. It will *not* write the delimiter.
+// Reads input until it finds the delimiter and continuously writes everything
+// else to output. It will *not* write the delimiter.
 func search(in byteReader, out io.Writer, delim []byte) error {
 	i := 0
 	buf := []byte{0}
